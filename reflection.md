@@ -34,6 +34,8 @@ Scheduler — The planning engine. Holds the Owner, Pet, a pool of Task objects,
 - Did your design change during implementation?
 - If yes, describe at least one change and why you made it.
 
+  One change that was made was the Schedule has a reference to a pet. At first, when the schedule was generated, there was no way to know whose play it was. Adding the pet to the schedule made it self contained.
+
 ---
 
 ## 2. Scheduling Logic and Tradeoffs
