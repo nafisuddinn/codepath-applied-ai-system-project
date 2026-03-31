@@ -87,3 +87,33 @@ test_sort_by_time_returns_chronological_order : Scheduler.sort_by_time() orders 
 test_mark_complete_daily_task_creates_next_day_task : Marking a daily task complete returns a new Task with due_date advanced by exactly 1 day - 5/5 stars reliability testing.
 
 test_detect_conflicts_flags_overlapping_time_slots : Scheduler.detect_conflicts() flags tasks whose time intervals overlap, and returns no warnings for clean back-to-back tasks - 5/5 stars reliability testing.
+
+## Features
+
+- Priority-Based Scheduling
+  Generates a daily care plan by sorting tasks highest-priority first, using duration as a tiebreaker so shorter tasks of equal urgency slot in earlier. Tasks that would push the plan past the owner's available time are skipped automatically and logged with a reason.
+
+- Sorting by Preferred Time
+  Tasks can carry an optional preferred start time (HH:MM). sort_by_time() orders them chronologically using a lambda key on zero-padded time strings — no parsing required. Tasks with no preferred time sort to the end.
+
+- Priority Filtering
+  filter_by_priority(min_priority) narrows the task pool to tasks at or above a given urgency level before scheduling, letting the owner run "urgent tasks only" plans without deleting lower-priority tasks.
+
+- Completion Filtering
+  filter_tasks(completed, pet_name) lets the owner query a finished schedule by status (done / pending) and optionally by pet name. Both filters apply together so cross-pet schedules can be queried precisely.
+
+- Daily & Weekly Recurrence
+  Marking a task complete automatically generates the next occurrence. Daily tasks advance by one day; weekly tasks advance by seven. The completed record is preserved — a fresh Task instance is returned with the updated due_date so history is never overwritten.
+
+- Conflict Warnings
+  detect_conflicts() scans one or more schedules for overlapping time intervals using the standard interval-overlap test (start_A < end_B AND start_B < end_A). It catches both same-pet overlaps and cross-pet conflicts where the owner would need to be in two places at once. Warnings are returned as messages rather than exceptions so the app keeps running.
+
+- Scheduling Reasoning
+  Every decision made during schedule generation — which tasks were included and why, which were skipped and why — is logged and surfaced via explain_reasoning() in plain English.
+
+- Multi-Pet Support
+  Each pet gets its own Scheduler instance and independent daily plan. The owner's time budget is shared context across all schedulers, and detect_conflicts() can compare schedules across pets in a single call.
+
+## Demo
+
+![PawPal+ App Screenshot](<Screenshot 2026-03-31 at 7.05.22 PM.png>)

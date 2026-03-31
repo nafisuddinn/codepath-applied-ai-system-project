@@ -114,6 +114,7 @@ with st.expander("Add a task", expanded=len(st.session_state.tasks) == 0):
         task_priority = st.selectbox("Priority",        list(PRIORITY_MAP.keys()), index=2)
     with tc3:
         task_frequency = st.selectbox("Frequency", ["daily", "weekly"])
+        task_time      = st.text_input("Preferred time (HH:MM, optional)", placeholder="e.g. 08:00")
         task_notes     = st.text_input("Notes (optional)", placeholder="e.g. bring treats")
 
     if st.button("Add task"):
@@ -123,6 +124,7 @@ with st.expander("Add a task", expanded=len(st.session_state.tasks) == 0):
             "duration":  int(task_duration),
             "priority":  PRIORITY_MAP[task_priority],
             "frequency": task_frequency,
+            "time":      task_time.strip(),
             "notes":     task_notes,
         })
         st.success(f"Added task: {task_name}")
@@ -194,8 +196,15 @@ if st.button("Generate schedule", type="primary", disabled=len(pet_names) == 0):
                 duration=t["duration"],
                 priority=t["priority"],
                 frequency=t["frequency"],
+                time=t.get("time", ""),
                 notes=t["notes"],
             ))
+
+        # Clear stale checkbox states so previously-checked slots don't
+        # carry over onto the freshly generated schedule.
+        for key in list(st.session_state.keys()):
+            if key.startswith("done_"):
+                del st.session_state[key]
 
         # Run the scheduling algorithm and store results in session state
         st.session_state.schedule  = scheduler.generate_schedule(date=today)
@@ -219,7 +228,19 @@ if st.session_state.schedule is not None:
             label = f"**{st_task.time_slot}** — {st_task.task.name} ({st_task.task.duration} min)"
             checked = st.checkbox(label, value=st_task.is_completed, key=f"done_{st_task.time_slot}")
             if checked and not st_task.is_completed:
-                st_task.mark_complete()
+                next_task = st_task.mark_complete()
+                # If the task recurs, save the next occurrence back to the task list
+                if next_task is not None:
+                    st.session_state.tasks.append({
+                        "name":      next_task.name,
+                        "category":  next_task.category,
+                        "duration":  next_task.duration,
+                        "priority":  next_task.priority,
+                        "frequency": next_task.frequency,
+                        "time":      next_task.time,
+                        "notes":     next_task.notes,
+                    })
+                    st.toast(f"'{next_task.name}' rescheduled for {next_task.due_date}.")
 
         st.caption(schedule.generate_summary())
 
