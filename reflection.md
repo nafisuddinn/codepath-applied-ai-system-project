@@ -2,6 +2,12 @@
 
 ## 1. System Design
 
+1. Let a user be able to define the owner and their pet with information such as the owner's schedule and the breed + necessities of the pet.
+
+2. Generate a daily schedule/routine that has restrictions and specifications revolving around the defined owner and pet.
+
+3. Create tasks that have durations and priorities.
+
 **a. Initial design**
 
 - Briefly describe your initial UML design.
