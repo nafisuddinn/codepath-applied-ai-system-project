@@ -1,28 +1,67 @@
+import os
 import streamlit as st
 from datetime import date
+from dotenv import load_dotenv
 from pawpal_system import Owner, Pet, Task, Scheduler
+from rag_advisor import PetCareRAG, ALL_PRESET_MODELS
+
+load_dotenv()
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 st.title("🐾 PawPal+")
 st.caption("Your daily pet care planner.")
 
 # ---------------------------------------------------------------------------
+# Sidebar — AI settings (OpenRouter key + model selector)
+# ---------------------------------------------------------------------------
+
+with st.sidebar:
+    st.header("AI Settings")
+
+    openrouter_key = st.text_input(
+        "OpenRouter API Key",
+        value=os.getenv("OPENROUTER_API_KEY", ""),
+        type="password",
+        help="Get a free key at openrouter.ai — required for AI schedule analysis.",
+    )
+
+    model_choice = st.selectbox(
+        "Model",
+        options=ALL_PRESET_MODELS + ["Custom..."],
+        index=0,
+        help="Free models are marked :free. Paid models require OpenRouter credits.",
+    )
+
+    if model_choice == "Custom...":
+        model_id = st.text_input(
+            "Custom model ID",
+            placeholder="e.g. mistralai/mixtral-8x7b-instruct",
+        )
+    else:
+        model_id = model_choice
+
+    ai_enabled = bool(openrouter_key and model_id)
+    if not openrouter_key:
+        st.info("Add an API key to enable AI schedule analysis.")
+
+# ---------------------------------------------------------------------------
 # Session state initialisation
-# Streamlit reruns the whole script on every interaction, so we store
-# all mutable data in st.session_state to persist it across reruns.
 # ---------------------------------------------------------------------------
 
 if "pets" not in st.session_state:
-    st.session_state.pets = []         # list of dicts: {name, species, breed, age, special_needs}
+    st.session_state.pets = []
 
 if "tasks" not in st.session_state:
-    st.session_state.tasks = []        # list of dicts: {name, category, duration, priority, notes}
+    st.session_state.tasks = []
 
 if "schedule" not in st.session_state:
-    st.session_state.schedule = None   # Schedule object from last run
+    st.session_state.schedule = None
 
 if "reasoning" not in st.session_state:
-    st.session_state.reasoning = ""    # explain_reasoning() output from last run
+    st.session_state.reasoning = ""
+
+if "ai_used" not in st.session_state:
+    st.session_state.ai_used = False
 
 # ---------------------------------------------------------------------------
 # Section 1 — Owner info
@@ -75,7 +114,6 @@ with st.expander("Add a pet", expanded=len(st.session_state.pets) == 0):
         })
         st.success(f"Added {pet_name}!")
 
-# Display registered pets
 if st.session_state.pets:
     st.write("**Registered pets:**")
     for i, p in enumerate(st.session_state.pets):
@@ -86,7 +124,6 @@ if st.session_state.pets:
                 f"**{p['name']}** — {p['breed']} {p['species']}, age {p['age']} | needs: {needs_str}"
             )
         with col_del:
-            # Each button needs a unique key to avoid Streamlit duplicate-widget errors
             if st.button("Remove", key=f"remove_pet_{i}"):
                 st.session_state.pets.pop(i)
                 st.rerun()
@@ -129,7 +166,6 @@ with st.expander("Add a task", expanded=len(st.session_state.tasks) == 0):
         })
         st.success(f"Added task: {task_name}")
 
-# Display registered tasks
 if st.session_state.tasks:
     st.write("**Registered tasks:**")
     for i, t in enumerate(st.session_state.tasks):
@@ -155,7 +191,6 @@ st.divider()
 
 st.header("4. Generate Schedule")
 
-# Choose which pet to schedule for (if more than one exists)
 pet_names = [p["name"] for p in st.session_state.pets]
 selected_pet_name = st.selectbox(
     "Schedule for which pet?",
@@ -166,18 +201,15 @@ selected_pet_name = st.selectbox(
 today = date.today().strftime("%Y-%m-%d")
 
 if st.button("Generate schedule", type="primary", disabled=len(pet_names) == 0):
-    # Guard: need at least one task to schedule
     if not st.session_state.tasks:
         st.warning("Add at least one task before generating a schedule.")
     else:
-        # Build the domain objects from session state
         owner = Owner(
             name=owner_name,
             time_available=int(time_available),
             preferences=preferences,
         )
 
-        # Find the selected pet dict and construct a Pet object
         pet_dict = next(p for p in st.session_state.pets if p["name"] == selected_pet_name)
         pet = Pet(
             name=pet_dict["name"],
@@ -187,7 +219,6 @@ if st.button("Generate schedule", type="primary", disabled=len(pet_names) == 0):
             special_needs=pet_dict["special_needs"],
         )
 
-        # Build the Scheduler and load every registered task into it
         scheduler = Scheduler(owner=owner, pet=pet)
         for t in st.session_state.tasks:
             scheduler.add_task(Task(
@@ -200,15 +231,26 @@ if st.button("Generate schedule", type="primary", disabled=len(pet_names) == 0):
                 notes=t["notes"],
             ))
 
-        # Clear stale checkbox states so previously-checked slots don't
-        # carry over onto the freshly generated schedule.
         for key in list(st.session_state.keys()):
             if key.startswith("done_"):
                 del st.session_state[key]
 
-        # Run the scheduling algorithm and store results in session state
-        st.session_state.schedule  = scheduler.generate_schedule(date=today)
-        st.session_state.reasoning = scheduler.explain_reasoning()
+        schedule = scheduler.generate_schedule(date=today)
+        st.session_state.schedule = schedule
+
+        # --- RAG: retrieve guidelines then generate grounded AI advice ---
+        if ai_enabled:
+            try:
+                rag = PetCareRAG(api_key=openrouter_key, model=model_id)
+                st.session_state.reasoning = rag.generate_advice(pet, owner, schedule)
+                st.session_state.ai_used = True
+            except Exception as e:
+                st.warning(f"AI advice unavailable ({e}). Showing mechanical reasoning.")
+                st.session_state.reasoning = scheduler.explain_reasoning()
+                st.session_state.ai_used = False
+        else:
+            st.session_state.reasoning = scheduler.explain_reasoning()
+            st.session_state.ai_used = False
 
 # ---------------------------------------------------------------------------
 # Section 5 — Display results
@@ -223,13 +265,11 @@ if st.session_state.schedule is not None:
     if not scheduled:
         st.warning("No tasks could be fit within the available time.")
     else:
-        # Render each scheduled task as a checkbox; checking it calls mark_complete()
         for st_task in sorted(scheduled, key=lambda x: x.time_slot):
             label = f"**{st_task.time_slot}** — {st_task.task.name} ({st_task.task.duration} min)"
             checked = st.checkbox(label, value=st_task.is_completed, key=f"done_{st_task.time_slot}")
             if checked and not st_task.is_completed:
                 next_task = st_task.mark_complete()
-                # If the task recurs, save the next occurrence back to the task list
                 if next_task is not None:
                     st.session_state.tasks.append({
                         "name":      next_task.name,
@@ -244,5 +284,10 @@ if st.session_state.schedule is not None:
 
         st.caption(schedule.generate_summary())
 
-    with st.expander("Scheduling reasoning"):
+    expander_label = (
+        f"AI Schedule Analysis (via {model_id})"
+        if st.session_state.ai_used
+        else "Scheduling reasoning"
+    )
+    with st.expander(expander_label):
         st.markdown(st.session_state.reasoning)
