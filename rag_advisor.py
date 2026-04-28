@@ -251,21 +251,12 @@ KNOWLEDGE_BASE: List[dict] = [
 # Default model presets (OpenRouter model IDs)
 # ---------------------------------------------------------------------------
 
-FREE_MODELS = [
-    "meta-llama/llama-3.1-8b-instruct:free",
-    "google/gemma-2-9b-it:free",
-    "mistralai/mistral-7b-instruct:free",
-    "qwen/qwen-2.5-7b-instruct:free",
+ALL_PRESET_MODELS = [
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "google/gemma-4-31b-it:free",
+    "openai/gpt-oss-20b:free",
 ]
-
-PAID_MODELS = [
-    "openai/gpt-4o-mini",
-    "anthropic/claude-haiku-4-5",
-    "google/gemini-flash-1.5",
-    "meta-llama/llama-3.1-70b-instruct",
-]
-
-ALL_PRESET_MODELS = FREE_MODELS + PAID_MODELS
 
 
 class PetCareRAG:

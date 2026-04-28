@@ -15,34 +15,24 @@ st.caption("Your daily pet care planner.")
 # Sidebar — AI settings (OpenRouter key + model selector)
 # ---------------------------------------------------------------------------
 
+openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
+
 with st.sidebar:
     st.header("AI Settings")
 
-    openrouter_key = st.text_input(
-        "OpenRouter API Key",
-        value=os.getenv("OPENROUTER_API_KEY", ""),
-        type="password",
-        help="Get a free key at openrouter.ai — required for AI schedule analysis.",
-    )
-
-    model_choice = st.selectbox(
-        "Model",
-        options=ALL_PRESET_MODELS + ["Custom..."],
-        index=0,
-        help="Free models are marked :free. Paid models require OpenRouter credits.",
-    )
-
-    if model_choice == "Custom...":
-        model_id = st.text_input(
-            "Custom model ID",
-            placeholder="e.g. mistralai/mixtral-8x7b-instruct",
-        )
+    if openrouter_key:
+        st.success("API key loaded from .env")
     else:
-        model_id = model_choice
+        st.warning("No API key found. Add OPENROUTER_API_KEY to your .env file.")
+
+    model_id = st.selectbox(
+        "Model",
+        options=ALL_PRESET_MODELS,
+        index=0,
+        help="All models are free-tier via OpenRouter — no credits required.",
+    )
 
     ai_enabled = bool(openrouter_key and model_id)
-    if not openrouter_key:
-        st.info("Add an API key to enable AI schedule analysis.")
 
 # ---------------------------------------------------------------------------
 # Session state initialisation

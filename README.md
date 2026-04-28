@@ -1,119 +1,108 @@
-# PawPal+ (Module 2 Project)
+# PawPal+
 
-You are building **PawPal+**, a Streamlit app that helps a pet owner plan care tasks for their pet.
+## The Original Project: PawPal
 
-## Scenario
+PawPal was a Streamlit web app that helped busy pet owners build a daily care schedule for their pets. It let you enter your pet's tasks (walks, feeding, medications, grooming), assign priorities and durations, and automatically arranged them into a time-blocked plan that fit within however many minutes you had available that day. Its explanations were purely mechanical — it told you what got scheduled and what got skipped, but had no knowledge of what was actually good or appropriate for your specific pet.
 
-A busy pet owner needs help staying consistent with pet care. They want an assistant that can:
+---
 
-- Track pet care tasks (walks, feeding, meds, enrichment, grooming, etc.)
-- Consider constraints (time available, priority, owner preferences)
-- Produce a daily plan and explain why it chose that plan
+## PawPal+ — What It Does Now and Why It Matters
 
-Your job is to design the system first (UML), then implement the logic in Python, then connect it to the Streamlit UI.
+PawPal+ adds a RAG (Retrieval-Augmented Generation) layer on top of the original scheduler. After your daily schedule is built, the app consults a curated library of real pet care guidelines — covering species, breeds, age groups, and health conditions — and retrieves only the ones relevant to your specific pet. Those guidelines are then handed to an AI model, which reads your schedule alongside them and produces expert, grounded analysis: not just what was scheduled, but whether it is actually appropriate for your pet and where it could be improved.
 
-## What you will build
+This matters because a generic scheduler treats a 1-year-old Beagle and a 10-year-old arthritic cat identically. PawPal+ does not. The advice you see is shaped by who your pet actually is.
 
-Your final app should:
+---
 
-- Let a user enter basic owner + pet info
-- Let a user add/edit tasks (duration + priority at minimum)
-- Generate a daily schedule/plan based on constraints and priorities
-- Display the plan clearly (and ideally explain the reasoning)
-- Include tests for the most important scheduling behaviors
+## Architecture Overview
 
-## Getting started
+![PawPal+ System Diagram](upgraded-rag.png)
 
-### Setup
+**How data flows through the system:**
+
+1. The owner enters their pet's profile (species, breed, age, special needs), a list of tasks, and how many minutes they have available
+2. The **Scheduler** (unchanged from PawPal) sorts tasks by priority and packs them into time slots — this part is fully deterministic
+3. The **Retriever** scores every chunk in the knowledge base by how many of its tags match the pet's profile and the scheduled task categories, then returns the top matches
+4. The **LLM** (via OpenRouter) receives the generated schedule plus the retrieved guidelines and produces advice that cites specific guidelines — it is not allowed to invent facts outside of what was retrieved
+5. The owner reads the AI analysis and decides whether to act on any suggestions — human review is the final check on AI output quality
+6. The **pytest suite** covers the deterministic Scheduler logic; non-deterministic LLM output is validated by the owner reading it
+
+---
+
+## Setup Instructions
+
+**1. Clone the repository and enter the project folder**
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+git clone <your-repo-url>
+cd ai110-module2show-pawpal-starter
+```
+
+**2. Create and activate a virtual environment**
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate      # Mac / Linux
+.venv\Scripts\activate         # Windows
+```
+
+**3. Install dependencies**
+
+```bash
 pip install -r requirements.txt
 ```
 
-### Suggested workflow
+**4. Add your OpenRouter API key**
 
-1. Read the scenario carefully and identify requirements and edge cases.
-2. Draft a UML diagram (classes, attributes, methods, relationships).
-3. Convert UML into Python class stubs (no logic yet).
-4. Implement scheduling logic in small increments.
-5. Add tests to verify key behaviors.
-6. Connect your logic to the Streamlit UI in `app.py`.
-7. Refine UML so it matches what you actually built.
+Create a `.env` file in the project root (it is already in `.gitignore` so it will not be committed):
 
-# Smart Scheduling
+```
+OPENROUTER_API_KEY=your_key_here
+```
 
-## Sorting & Filtering
+Get a free key at [openrouter.ai](https://openrouter.ai).
 
-Two sort strategies live on Scheduler:
+**5. Run the app**
 
-sort_tasks() sorts by priority descending, duration ascending — highest urgency first, shortest tasks as a tiebreaker to pack more into the time budget
-sort_by_time() sorts by the task's preferred time field using a lambda key on "HH:MM" strings, which sort correctly lexicographically because the format is zero-padded. Tasks with no time set fall to the bottom via a "99:99" sentinel.
-Filtering is split between two classes:
+```bash
+streamlit run app.py
+```
 
-Scheduler.filter_by_priority(min_priority) narrows the task pool before scheduling — uses >= so the threshold is inclusive
-Schedule.filter_tasks(completed, pet_name) narrows the already-scheduled tasks by completion status and/or pet name with AND logic. The is not None guard ensures completed=False isn't skipped as a falsy value.
+**6. Using the app**
 
-## Automating Recurring Tasks
+- Fill in your name and how many minutes you have today
+- Add one or more pets (species, breed, age, any special needs)
+- Add the tasks you want to complete (category, duration, priority)
+- In the sidebar, confirm your API key is loaded and pick a model
+- Click **Generate schedule** — your plan appears along with an AI analysis in the expandable panel at the bottom
 
-Task gained a due_date field and a next_occurrence() method. When called, it reads due_date as a baseline (falling back to today if unset) and adds a timedelta — +1 day for daily, +7 days for weekly. It returns a new Task instance rather than mutating the original, preserving the completed record.
+**7. Run the tests**
 
-ScheduledTask.mark_complete() ties it together: it flips is_completed, calls next_occurrence() if the task is recurring, and returns the new Task (or None for one-offs). The caller pattern is simply:
+```bash
+pytest
+```
 
-next_task = scheduled_task.mark_complete()
-if next_task:
-scheduler.add_task(next_task)
+---
 
-## Conflict Detection
+## Design Decisions
 
-Scheduler.detect_conflicts(\*schedules) accepts one or more Schedule objects, flattens all their tasks into a single list, then compares every unique pair using the standard interval-overlap test:
+### Why RAG instead of just prompting an LLM directly?
 
-start_A < end_B AND start_B < end_A
+Sending only the schedule to an LLM and asking for advice would produce generic answers drawn from the model's training data — accurate on average, but not grounded in anything specific. RAG flips this: the knowledge base is retrieved first based on the actual pet's profile, and the LLM is constrained to cite only what was retrieved. This means a Beagle gets Beagle-specific advice, a diabetic cat gets diabetes-specific advice, and the model cannot hallucinate guidelines that were never part of the library.
 
-Times are converted from "HH:MM" strings to minutes since midnight via \_slot_to_minutes() so the arithmetic is straightforward. Strict < (not <=) means tasks that share only an endpoint are not flagged — a clean handoff is not a conflict. Warnings are returned as strings rather than raised as exceptions so the app keeps running and the owner sees all conflicts at once.
+### Why tag-based retrieval instead of embeddings?
 
-## Testing PawPal+
+Embedding-based retrieval (e.g. with a vector database) is more powerful for open-ended queries but adds significant infrastructure — you need an embedding model, a vector store, and an indexing step. For a knowledge base of this size and a well-defined input schema (species, breed, age, task category), tag scoring is faster, fully transparent, and requires no external services. Every retrieval decision can be inspected directly in the code.
 
-Using {python3 -m pytest}
-Pytest runs the following tests that cover multiple fields.
+### Why OpenRouter instead of a single provider?
 
-test_mark_complete_changes_status : ScheduledTask.mark_complete() flips is_completed from False to True - 5/5 stars reliability testing.
+OpenRouter gives access to dozens of models — including several free tiers — through one API key and one standardised interface. This means you can switch between Llama, Gemma, Mistral, GPT-4o, or any other model by changing a single dropdown, without touching any code. It also avoids locking the project to a paid provider for a demo or educational context.
 
-test_adding_task_increases_scheduler_task_count : Scheduler.add_task() grows the task pool from 0 to 1 - 5/5 stars reliability testing.
+### Trade-offs
 
-test_sort_by_time_returns_chronological_order : Scheduler.sort_by_time() orders tasks by HH:MMascending; tasks with no time sort last - 5/5 stars reliability testing.
-
-test_mark_complete_daily_task_creates_next_day_task : Marking a daily task complete returns a new Task with due_date advanced by exactly 1 day - 5/5 stars reliability testing.
-
-test_detect_conflicts_flags_overlapping_time_slots : Scheduler.detect_conflicts() flags tasks whose time intervals overlap, and returns no warnings for clean back-to-back tasks - 5/5 stars reliability testing.
-
-## Features
-
-- Priority-Based Scheduling
-  Generates a daily care plan by sorting tasks highest-priority first, using duration as a tiebreaker so shorter tasks of equal urgency slot in earlier. Tasks that would push the plan past the owner's available time are skipped automatically and logged with a reason.
-
-- Sorting by Preferred Time
-  Tasks can carry an optional preferred start time (HH:MM). sort_by_time() orders them chronologically using a lambda key on zero-padded time strings — no parsing required. Tasks with no preferred time sort to the end.
-
-- Priority Filtering
-  filter_by_priority(min_priority) narrows the task pool to tasks at or above a given urgency level before scheduling, letting the owner run "urgent tasks only" plans without deleting lower-priority tasks.
-
-- Completion Filtering
-  filter_tasks(completed, pet_name) lets the owner query a finished schedule by status (done / pending) and optionally by pet name. Both filters apply together so cross-pet schedules can be queried precisely.
-
-- Daily & Weekly Recurrence
-  Marking a task complete automatically generates the next occurrence. Daily tasks advance by one day; weekly tasks advance by seven. The completed record is preserved — a fresh Task instance is returned with the updated due_date so history is never overwritten.
-
-- Conflict Warnings
-  detect_conflicts() scans one or more schedules for overlapping time intervals using the standard interval-overlap test (start_A < end_B AND start_B < end_A). It catches both same-pet overlaps and cross-pet conflicts where the owner would need to be in two places at once. Warnings are returned as messages rather than exceptions so the app keeps running.
-
-- Scheduling Reasoning
-  Every decision made during schedule generation — which tasks were included and why, which were skipped and why — is logged and surfaced via explain_reasoning() in plain English.
-
-- Multi-Pet Support
-  Each pet gets its own Scheduler instance and independent daily plan. The owner's time budget is shared context across all schedulers, and detect_conflicts() can compare schedules across pets in a single call.
-
-## Demo
-
-![PawPal+ App Screenshot](<Screenshot 2026-03-31 at 7.05.22 PM.png>)
+| Decision                                | Benefit                                                  | Trade-off                                               |
+| --------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------- |
+| Tag-based retrieval                     | Simple, transparent, no extra services                   | Less flexible than semantic search for unusual queries  |
+| Knowledge base is hardcoded             | No database required, easy to inspect and extend         | Adding new guidelines requires editing the Python file  |
+| LLM call happens on schedule generation | Advice is always fresh and reflects the current schedule | Adds a network round-trip; free model tiers may be slow |
+| Fallback to mechanical reasoning        | App still works without an API key                       | Fallback output is much less useful                     |
