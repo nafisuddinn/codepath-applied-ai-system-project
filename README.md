@@ -84,6 +84,49 @@ pytest
 
 ---
 
+## Example Outputs
+
+These are real outputs from the live app, demonstrating that the retrieved guidelines actively shape the AI's analysis for each specific pet.
+
+---
+
+### Example 1 — 2-year-old Beagle (Biscuit)
+
+**Owner:** Alex · **Time available:** 90 min
+
+**Tasks scheduled:** Morning Walk (walk, 30 min, High priority), Breakfast (feeding, 15 min, High priority)
+
+**AI Analysis:**
+Alex, per Guideline 1, Biscuit's 30-minute morning walk satisfies the lower end of the daily walking need, but adult dogs ideally get 30–60 minutes split into two sessions. The schedule currently lacks an evening walk, leaving a gap in recommended exercise. Suggestion: add a second walk of 30–45 minutes later today (e.g., around 17:00–18:00).
+
+---
+
+### Example 2 — 12-year-old Persian cat with kidney disease (Luna)
+
+**Owner:** Bob · **Time available:** 60 min
+
+**Tasks scheduled:** Wet Food Meal (feeding, 10 min, High), Brushing (grooming, 15 min, Medium), Playtime (enrichment, 20 min, Low)
+
+**AI Analysis:**
+Bob, Luna's single wet-food meal at 08:00 provides hydration but falls short of the guideline that senior cats with CKD benefit from 2–3 small measured meals per day to maintain weight and control phosphorus (Guideline 1 & 2). Gap: only one meal is scheduled where multiple smaller meals are recommended.
+
+---
+
+### Example 3 — 7-year-old Labrador with arthritis (Max)
+
+**Owner:** Leonard · **Time available:** 60 min
+
+**Tasks scheduled:** Morning Walk (walk, 20 min, High), Medication (meds, 5 min, High), Feeding (feeding, 10 min, High)
+
+**AI Analysis:**
+Leonard, per Guideline 1, adult dogs like Max should receive 30–60 minutes of walking each day, ideally split into two sessions. Today's schedule only includes a 20-minute morning walk, leaving a gap of at least 10–40 minutes of unmet exercise and missing the recommended second walk. Adding an evening walk of 15–20 minutes would meet the split-session recommendation and help support his digestion and joint mobility without over-exerting his arthritic joints.
+
+Per Guideline 4, most adult dogs thrive on two meals spaced 8–12 hours apart. Max's schedule shows only a single feeding at 08:05, so the second meal is missing, which could disrupt digestion and increase bloat risk in his large-breed frame. Scheduling a second feeding roughly 8–12 hours after breakfast (e.g., around 16:30–20:05) would align with the guideline, stabilizing his energy levels and reducing gastrointestinal concerns.
+
+Medication timing isn't covered in the retrieved guidelines, so no assessment is made on that task.
+
+---
+
 ## Design Decisions
 
 ### Why RAG instead of just prompting an LLM directly?
@@ -106,3 +149,19 @@ OpenRouter gives access to dozens of models — including several free tiers —
 | Knowledge base is hardcoded             | No database required, easy to inspect and extend         | Adding new guidelines requires editing the Python file  |
 | LLM call happens on schedule generation | Advice is always fresh and reflects the current schedule | Adds a network round-trip; free model tiers may be slow |
 | Fallback to mechanical reasoning        | App still works without an API key                       | Fallback output is much less useful                     |
+
+---
+
+## Testing Summary
+
+**What worked:** Leveraging AI to expand the knowledge base was a major advantage. Being able to cover more pet care cases than could be thought of manually meant the retriever had a broader and more accurate pool to draw from, resulting in better AI outputs across a wider range of pets and conditions.
+
+**What didn't work:** Keeping the knowledge base up to date is a persistent challenge. Manually editing the Python file every time new guidelines are needed doesn't scale well, and outdated information directly affects the quality of the AI's advice.
+
+**Future improvement:** The next step would be implementing a full agentic loop — where the system can feed outputs and user interactions back into itself to automatically identify gaps in the knowledge base and improve over time, rather than relying on manual updates.
+
+---
+
+## Reflection
+
+This project demonstrated that high quality AI applications require a strong foundation of accurate, well organized data. Training a model or building a retrieval system is only as good as the information behind it -- garbage in, garbage out. The knowledge base in PawPal+ made that real. Every piece of advice the AI gave was only as useful as the guidelines that were retrieved. The RAG workflow reinforced how important it is to maintain the right data at the right time, so that the information that reaches the user is relevant and trustworthy rather than generic and doesn't apply to the user.
