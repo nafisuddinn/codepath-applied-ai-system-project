@@ -277,9 +277,8 @@ class PetCareRAG:
         self._model = model
         self._top_k = top_k
 
-    def retrieve(self, pet, tasks: list) -> List[str]:
-        """Score every knowledge chunk against the pet's profile + task set.
-        Returns the top-k most relevant chunks as plain text strings."""
+    def _build_query_tags(self, pet, tasks: list) -> set:
+        """Build the normalised tag set used for retrieval scoring."""
         if pet.species.lower() == "cat":
             age_group = "puppy" if pet.age < 1 else "senior" if pet.age >= 11 else "adult"
         else:
@@ -290,36 +289,75 @@ class PetCareRAG:
             age_group,
             *(t.category.lower() for t in tasks),
         }
-        # Split breed into individual words so "Golden Retriever" → {"golden", "retriever"}
         query_tags |= {w.lower() for w in pet.breed.split()}
-        # Split each special need so "kidney disease" → {"kidney", "disease"}
         for need in pet.special_needs:
             query_tags |= {w.lower() for w in need.split()}
+        return query_tags
 
+    def _retrieve_scored(self, pet, tasks: list) -> List[tuple]:
+        """Return top-k chunks as (text, match_ratio) pairs.
+        match_ratio = matched tags / total tags on that chunk (0.0–1.0)."""
+        query_tags = self._build_query_tags(pet, tasks)
         scored: list = []
         for chunk in KNOWLEDGE_BASE:
-            score = len(set(chunk["tags"]) & query_tags)
-            if score > 0:
-                scored.append((score, chunk["text"]))
+            raw_score = len(set(chunk["tags"]) & query_tags)
+            if raw_score > 0:
+                match_ratio = raw_score / len(chunk["tags"])
+                scored.append((match_ratio, chunk["text"]))
 
         scored.sort(key=lambda x: -x[0])
-        return [text for _, text in scored[: self._top_k]]
+        return scored[: self._top_k]
 
-    def generate_advice(self, pet, owner, schedule) -> str:
-        """Retrieve relevant guidelines then call the LLM to produce expert,
-        grounded advice. The model is instructed to cite specific retrieved
-        guidelines rather than relying on general training knowledge.
+    def retrieve(self, pet, tasks: list) -> List[str]:
+        """Public convenience method — returns just the text strings."""
+        return [text for _, text in self._retrieve_scored(pet, tasks)]
 
-        Falls back to a plain message if no relevant guidelines are found.
+    def _retrieval_confidence(self, scored_chunks: List[tuple]) -> float:
+        """Average match ratio across retrieved chunks (0.0–1.0).
+        1.0 = every tag on every retrieved chunk matched the pet's profile."""
+        if not scored_chunks:
+            return 0.0
+        return sum(ratio for ratio, _ in scored_chunks) / len(scored_chunks)
+
+    def _output_confidence(self, advice: str, num_retrieved: int) -> tuple:
+        """Count how many retrieved guidelines the model actually cited.
+        Returns (cited_count, coverage_ratio 0.0–1.0)."""
+        import re
+        if num_retrieved == 0:
+            return 0, 0.0
+        cited = set()
+        for match in re.finditer(r'[Gg]uideline\s+(\d+)', advice):
+            n = int(match.group(1))
+            if 1 <= n <= num_retrieved:
+                cited.add(n)
+        return len(cited), len(cited) / num_retrieved
+
+    def generate_advice(self, pet, owner, schedule) -> dict:
+        """Retrieve relevant guidelines, call the LLM, and return a dict with:
+          - advice: the AI-generated text
+          - retrieval_confidence: float 0.0–1.0
+          - chunks_retrieved: int
+          - guidelines_cited: int
+          - output_confidence: float 0.0–1.0
+
+        Falls back gracefully if no guidelines match the pet's profile.
         """
         tasks = [st.task for st in schedule.scheduled_tasks]
-        retrieved = self.retrieve(pet, tasks)
+        scored_chunks = self._retrieve_scored(pet, tasks)
+        retrieved = [text for _, text in scored_chunks]
+        ret_conf = self._retrieval_confidence(scored_chunks)
 
         if not retrieved:
-            return (
-                f"No specific guidelines found for {pet.name}'s profile. "
-                "The schedule was built on priority and time-availability rules."
-            )
+            return {
+                "advice": (
+                    f"No specific guidelines found for {pet.name}'s profile. "
+                    "The schedule was built on priority and time-availability rules."
+                ),
+                "retrieval_confidence": 0.0,
+                "chunks_retrieved": 0,
+                "guidelines_cited": 0,
+                "output_confidence": 0.0,
+            }
 
         schedule_lines = [
             f"  {st.time_slot} — {st.task.name} "
@@ -367,4 +405,13 @@ Do not repeat the schedule. Do not introduce facts not present in the retrieved 
             max_tokens=700,
             messages=[{"role": "user", "content": prompt}],
         )
-        return response.choices[0].message.content
+        advice = response.choices[0].message.content
+        cited_count, out_conf = self._output_confidence(advice, len(retrieved))
+
+        return {
+            "advice": advice,
+            "retrieval_confidence": ret_conf,
+            "chunks_retrieved": len(retrieved),
+            "guidelines_cited": cited_count,
+            "output_confidence": out_conf,
+        }

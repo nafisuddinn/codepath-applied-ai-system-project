@@ -53,6 +53,9 @@ if "reasoning" not in st.session_state:
 if "ai_used" not in st.session_state:
     st.session_state.ai_used = False
 
+if "rag_metrics" not in st.session_state:
+    st.session_state.rag_metrics = None
+
 # ---------------------------------------------------------------------------
 # Section 1 — Owner info
 # ---------------------------------------------------------------------------
@@ -232,14 +235,18 @@ if st.button("Generate schedule", type="primary", disabled=len(pet_names) == 0):
         if ai_enabled:
             try:
                 rag = PetCareRAG(api_key=openrouter_key, model=model_id)
-                st.session_state.reasoning = rag.generate_advice(pet, owner, schedule)
+                result = rag.generate_advice(pet, owner, schedule)
+                st.session_state.reasoning = result["advice"]
+                st.session_state.rag_metrics = result
                 st.session_state.ai_used = True
             except Exception as e:
                 st.warning(f"AI advice unavailable ({e}). Showing mechanical reasoning.")
                 st.session_state.reasoning = scheduler.explain_reasoning()
+                st.session_state.rag_metrics = None
                 st.session_state.ai_used = False
         else:
             st.session_state.reasoning = scheduler.explain_reasoning()
+            st.session_state.rag_metrics = None
             st.session_state.ai_used = False
 
 # ---------------------------------------------------------------------------
@@ -280,4 +287,22 @@ if st.session_state.schedule is not None:
         else "Scheduling reasoning"
     )
     with st.expander(expander_label):
+        if st.session_state.ai_used and st.session_state.rag_metrics:
+            m = st.session_state.rag_metrics
+            c1, c2 = st.columns(2)
+            with c1:
+                st.caption("Retrieval confidence")
+                st.progress(m["retrieval_confidence"])
+                st.caption(
+                    f"{m['chunks_retrieved']} guideline(s) retrieved · "
+                    f"{round(m['retrieval_confidence'] * 100)}% avg tag match"
+                )
+            with c2:
+                st.caption("Guideline coverage")
+                st.progress(m["output_confidence"])
+                st.caption(
+                    f"{m['guidelines_cited']} of {m['chunks_retrieved']} "
+                    "guideline(s) cited by the AI"
+                )
+            st.divider()
         st.markdown(st.session_state.reasoning)
