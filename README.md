@@ -16,7 +16,7 @@ This matters because a generic scheduler treats a 1-year-old Beagle and a 10-yea
 
 ## Architecture Overview
 
-![PawPal+ System Diagram](upgraded-rag.png)
+![PawPal+ System Diagram](assets/upgraded-rag.png)
 
 **How data flows through the system:**
 
